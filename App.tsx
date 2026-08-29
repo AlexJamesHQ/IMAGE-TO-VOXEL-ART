@@ -129,7 +129,9 @@ const App: React.FC = () => {
   const handleError = (err: any) => {
     setStatus('error');
     let message = err?.message || 'An unexpected error occurred.';
-    if (typeof message === 'string' && (message.includes('403') || message.includes('PERMISSION_DENIED') || message.includes('permission'))) {
+    if (typeof message === 'string' && (message.includes('429') || message.includes('RESOURCE_EXHAUSTED') || message.includes('quota'))) {
+      message = 'API Quota Exceeded (429). Your API key has reached its rate limit or free tier quota. Please wait a moment or click "Custom API Key" at the top to use your own Gemini API key.';
+    } else if (typeof message === 'string' && (message.includes('403') || message.includes('PERMISSION_DENIED') || message.includes('permission'))) {
       message = 'Permission denied (403). Please verify your Gemini API key has proper permissions in the API Key settings, or upload an image directly to generate 3D voxels.';
     }
     setErrorMsg(message);
