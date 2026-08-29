@@ -117,7 +117,7 @@ Prompt: ${prompt}`
     }
   }
 
-  const imageModels = ['gemini-3.1-flash-lite-image', 'gemini-3.1-flash-image', 'imagen-3.0-generate-002'];
+  const imageModels = ['gemini-2.5', 'gemini-2.5-flash', 'gemini-3.5-flash', 'gemini-3.1-flash-lite-image'];
 
   for (const modelName of imageModels) {
     try {
@@ -268,7 +268,7 @@ export const generateVoxelScene = async (
   const mimeMatch = imageBase64.match(/^data:(.*?);base64,/);
   const mimeType = mimeMatch ? mimeMatch[1] : 'image/jpeg';
 
-  const modelsToTry = ['gemini-3.7-flash', 'gemini-3.1-pro-preview'];
+  const modelsToTry = ['gemini-2.5', 'gemini-2.5-flash', 'gemini-3.5-flash', 'gemini-3.7-flash'];
   let lastError: any = null;
 
   for (const modelName of modelsToTry) {
