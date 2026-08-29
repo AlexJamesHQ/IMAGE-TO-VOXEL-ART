@@ -102,7 +102,7 @@ export const generateImage = async (
   if (optimize) {
     try {
       const optResponse = await ai.models.generateContent({
-        model: 'gemini-2.5',
+        model: 'gemini-3.7-flash',
         contents: [
           `You are an expert prompt engineer. Expand this simple prompt into a highly descriptive, visually rich scenic prompt designed for an AI image generator. Describe the lighting, exact color schemes, atmosphere, precise camera angle, and artistic composition. Keep the final output under 150 words. Do not include any intros or explanations.
 
@@ -117,7 +117,7 @@ Prompt: ${prompt}`
     }
   }
 
-  const imageModels = ['gemini-2.5', 'gemini-3.5-flash'];
+  const imageModels = ['gemini-3.1-flash-lite-image', 'gemini-3.1-flash-image', 'imagen-3.0-generate-002'];
 
   for (const modelName of imageModels) {
     try {
@@ -240,7 +240,7 @@ export const generateVoxelScene = async (
   const mimeMatch = imageBase64.match(/^data:(.*?);base64,/);
   const mimeType = mimeMatch ? mimeMatch[1] : 'image/jpeg';
 
-  const modelsToTry = ['gemini-2.5', 'gemini-3.5-flash'];
+  const modelsToTry = ['gemini-3.7-flash', 'gemini-3.1-pro-preview'];
   let lastError: any = null;
 
   for (const modelName of modelsToTry) {
