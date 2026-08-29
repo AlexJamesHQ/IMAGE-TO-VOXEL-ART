@@ -77,33 +77,47 @@ export const generateImage = async (
   optimize: boolean = true,
   customApiKey?: string
 ): Promise<string> => {
-  // If running on client, fetch from server API
+  // If running on client, try server API first, with fallback to direct client call for static hosting (like Vercel)
   if (typeof window !== 'undefined') {
-    const response = await fetch('/api/generate-image', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ prompt, aspectRatio, useOptimization: optimize, customApiKey }),
-    });
+    try {
+      const response = await fetch('/api/generate-image', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ prompt, aspectRatio, useOptimization: optimize, customApiKey }),
+      });
 
-    if (!response.ok) {
-      const errData = await response.json().catch(() => ({}));
-      throw new Error(errData.error || "Image generation failed.");
+      if (response.ok) {
+        const data = await response.json();
+        if (data.imageUrl) return data.imageUrl;
+      }
+    } catch (netErr) {
+      console.warn("Server API not available, falling back to direct client generation:", netErr);
     }
-
-    const data = await response.json();
-    return data.imageUrl;
   }
 
-  // Running on server:
+  // Client-side direct generation (or server-side execution):
   const ai = getGenAIClient(customApiKey);
   let finalPrompt = prompt;
 
   if (optimize) {
-    finalPrompt = `${IMAGE_SYSTEM_PROMPT}\n\nSubject: ${prompt}`;
+    try {
+      const optResponse = await ai.models.generateContent({
+        model: 'gemini-2.5',
+        contents: [
+          `You are an expert prompt engineer. Expand this simple prompt into a highly descriptive, visually rich scenic prompt designed for an AI image generator. Describe the lighting, exact color schemes, atmosphere, precise camera angle, and artistic composition. Keep the final output under 150 words. Do not include any intros or explanations.
+
+Prompt: ${prompt}`
+        ]
+      });
+      if (optResponse.text) {
+        finalPrompt = optResponse.text.trim();
+      }
+    } catch (e) {
+      finalPrompt = `${IMAGE_SYSTEM_PROMPT}\n\nSubject: ${prompt}`;
+    }
   }
 
-  // Model cascade: try flash-lite-image first, then imagen-3.0-generate-002, then flash-image
-  const imageModels = ['gemini-3.1-flash-lite-image', 'gemini-3.1-flash-image'];
+  const imageModels = ['gemini-2.5', 'gemini-3.5-flash'];
 
   for (const modelName of imageModels) {
     try {
@@ -138,7 +152,7 @@ export const generateImage = async (
     }
   }
 
-  // Fallback to Imagen 3 if Gemini flash-lite image returned 403 or failed
+  // Fallback to Imagen 3
   try {
     const imagenResponse = await ai.models.generateImages({
       model: 'imagen-3.0-generate-002',
@@ -166,75 +180,67 @@ export const generateVoxelScene = async (
   onThoughtUpdate?: (thought: string) => void,
   customApiKey?: string
 ): Promise<string> => {
-  // If running on client, fetch from streaming server API
+  // If running on client, try server API first with SSE streaming, with fallback to direct client call for static hosting (Vercel)
   if (typeof window !== 'undefined') {
-    const response = await fetch('/api/generate-voxel-stream', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ image: imageBase64, customApiKey }),
-    });
+    try {
+      const response = await fetch('/api/generate-voxel-stream', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ image: imageBase64, customApiKey }),
+      });
 
-    if (!response.ok) {
-      const errData = await response.json().catch(() => ({}));
-      throw new Error(errData.error || "Voxel generation failed.");
-    }
+      if (response.ok && response.body) {
+        const reader = response.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = "";
+        let finalCode = "";
 
-    const reader = response.body?.getReader();
-    if (!reader) {
-      throw new Error("Failed to read response stream.");
-    }
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
 
-    const decoder = new TextDecoder();
-    let buffer = "";
-    let finalCode = "";
+          buffer += decoder.decode(value, { stream: true });
+          const lines = buffer.split('\n');
+          buffer = lines.pop() || "";
 
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
+          for (const line of lines) {
+            const trimmed = line.trim();
+            if (!trimmed || !trimmed.startsWith('data: ')) continue;
+            try {
+              const jsonStr = trimmed.slice(6).trim();
+              if (!jsonStr) continue;
+              const data = JSON.parse(jsonStr);
 
-      buffer += decoder.decode(value, { stream: true });
-      const lines = buffer.split('\n');
-      buffer = lines.pop() || "";
-
-      for (const line of lines) {
-        const trimmed = line.trim();
-        if (!trimmed || !trimmed.startsWith('data: ')) continue;
-        try {
-          const jsonStr = trimmed.slice(6).trim();
-          if (!jsonStr) continue;
-          const data = JSON.parse(jsonStr);
-
-          if (data.type === 'thought') {
-            if (onThoughtUpdate) onThoughtUpdate(data.text);
-          } else if (data.type === 'result') {
-            finalCode = data.text;
-          } else if (data.type === 'error') {
-            throw new Error(data.text);
+              if (data.type === 'thought') {
+                if (onThoughtUpdate) onThoughtUpdate(data.text);
+              } else if (data.type === 'result') {
+                finalCode = data.text;
+              } else if (data.type === 'error') {
+                throw new Error(data.text);
+              }
+            } catch (e: any) {
+              if (e.message && (e.message.includes("Voxel generation failed") || e.message.includes("Permission denied"))) {
+                throw e;
+              }
+            }
           }
-        } catch (e: any) {
-          if (e.message?.includes("Voxel generation failed") || e.message?.includes("Permission denied")) {
-            throw e;
-          }
-          // Ignore partial chunk parsing errors
+        }
+
+        if (finalCode) {
+          return finalCode;
         }
       }
+    } catch (netErr) {
+      console.warn("Server streaming API not available, falling back to direct client generation:", netErr);
     }
-
-    if (!finalCode) {
-      throw new Error("No voxel code was returned from server.");
-    }
-    return finalCode;
   }
 
-  // Running on server:
-  // Extract the base64 data part if it includes the prefix
+  // Client-side direct generation (or server-side execution):
   const base64Data = imageBase64.split(',')[1] || imageBase64;
-  
-  // Extract MIME type from the data URL if present, otherwise default to jpeg
   const mimeMatch = imageBase64.match(/^data:(.*?);base64,/);
   const mimeType = mimeMatch ? mimeMatch[1] : 'image/jpeg';
 
-  const modelsToTry = ['gemini-3.7-flash', 'gemini-3.1-pro-preview', 'gemini-2.5-flash'];
+  const modelsToTry = ['gemini-2.5', 'gemini-3.5-flash'];
   let lastError: any = null;
 
   for (const modelName of modelsToTry) {
