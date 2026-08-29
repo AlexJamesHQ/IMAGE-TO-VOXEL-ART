@@ -77,6 +77,24 @@ export const generateImage = async (
   optimize: boolean = true,
   customApiKey?: string
 ): Promise<string> => {
+  // If running on client, fetch from server API
+  if (typeof window !== 'undefined') {
+    const response = await fetch('/api/generate-image', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ prompt, aspectRatio, useOptimization: optimize, customApiKey }),
+    });
+
+    if (!response.ok) {
+      const errData = await response.json().catch(() => ({}));
+      throw new Error(errData.error || "Image generation failed.");
+    }
+
+    const data = await response.json();
+    return data.imageUrl;
+  }
+
+  // Running on server:
   const ai = getGenAIClient(customApiKey);
   let finalPrompt = prompt;
 
@@ -148,6 +166,67 @@ export const generateVoxelScene = async (
   onThoughtUpdate?: (thought: string) => void,
   customApiKey?: string
 ): Promise<string> => {
+  // If running on client, fetch from streaming server API
+  if (typeof window !== 'undefined') {
+    const response = await fetch('/api/generate-voxel-stream', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ image: imageBase64, customApiKey }),
+    });
+
+    if (!response.ok) {
+      const errData = await response.json().catch(() => ({}));
+      throw new Error(errData.error || "Voxel generation failed.");
+    }
+
+    const reader = response.body?.getReader();
+    if (!reader) {
+      throw new Error("Failed to read response stream.");
+    }
+
+    const decoder = new TextDecoder();
+    let buffer = "";
+    let finalCode = "";
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split('\n');
+      buffer = lines.pop() || "";
+
+      for (const line of lines) {
+        const trimmed = line.trim();
+        if (!trimmed || !trimmed.startsWith('data: ')) continue;
+        try {
+          const jsonStr = trimmed.slice(6).trim();
+          if (!jsonStr) continue;
+          const data = JSON.parse(jsonStr);
+
+          if (data.type === 'thought') {
+            if (onThoughtUpdate) onThoughtUpdate(data.text);
+          } else if (data.type === 'result') {
+            finalCode = data.text;
+          } else if (data.type === 'error') {
+            throw new Error(data.text);
+          }
+        } catch (e: any) {
+          if (e.message?.includes("Voxel generation failed") || e.message?.includes("Permission denied")) {
+            throw e;
+          }
+          // Ignore partial chunk parsing errors
+        }
+      }
+    }
+
+    if (!finalCode) {
+      throw new Error("No voxel code was returned from server.");
+    }
+    return finalCode;
+  }
+
+  // Running on server:
   // Extract the base64 data part if it includes the prefix
   const base64Data = imageBase64.split(',')[1] || imageBase64;
   
