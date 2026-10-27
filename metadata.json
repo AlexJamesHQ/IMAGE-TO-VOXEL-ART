@@ -3,6 +3,6 @@
   "description": "Create voxel art scenes inspired by any image.",
   "requestFramePermissions": [],
   "majorCapabilities": [
-    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+    ""
   ]
 }
